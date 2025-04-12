@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XML to Excel Converter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .converter-container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .drop-area {
+            border: 3px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px 20px;
+            margin-bottom: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .drop-area.highlight {
+            border-color: #4CAF50;
+            background-color: rgba(76, 175, 80, 0.1);
+        }
+        
+        .drop-message {
+            font-size: 1.2rem;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        
+        .file-info {
+            color: #555;
+            margin: 15px 0;
+            font-size: 0.95rem;
+        }
+        
+        .convert-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 35px;
+            font-size: 1.1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            margin-top: 10px;
+        }
+        
+        .convert-btn:hover {
+            background-color: #388E3C;
+        }
+        
+        .convert-btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        
+        .error {
+            color: #D32F2F;
+        }
+        
+        .success {
+            color: #388E3C;
+        }
+        
+        .icon {
+            font-size: 40px;
+            margin-bottom: 15px;
+        }
+        
+        .debug-info {
+            margin-top: 20px;
+            text-align: left;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="converter-container">
+        <h1>XML to Excel Converter</h1>
+        
+        <div id="drop-area" class="drop-area">
+            <div class="icon">📁</div>
+            <div class="drop-message">Drag & Drop your XML file here</div>
+            <div class="drop-message">or</div>
+            <input type="file" id="file-input" accept=".xml" style="display: none;">
+            <button onclick="document.getElementById('file-input').click()" class="convert-btn" style="background-color: #2196F3;">Browse Files</button>
+        </div>
+        
+        <div id="file-info" class="file-info">No file selected</div>
+        
+        <button id="convert-btn" class="convert-btn" disabled>Convert to Excel</button>
+        
+        <div id="status" class="status"></div>
+        <div id="debug-info" class="debug-info"></div>
+    </div>
+
+    <script>
+        // Global variables
+        let xmlFile = null;
+        const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('file-input');
+        const fileInfo = document.getElementById('file-info');
+        const convertBtn = document.getElementById('convert-btn');
+        const statusEl = document.getElementById('status');
+        const debugInfo = document.getElementById('debug-info');
+
+        // Prevent default drag behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        // Highlight drop area when item is dragged over it
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+
+        // Handle dropped files
+        dropArea.addEventListener('drop', handleDrop, false);
+        
+        // Handle selected files via browse button
+        fileInput.addEventListener('change', handleFiles, false);
+        
+        // Convert button click
+        convertBtn.addEventListener('click', convertXmlToExcel, false);
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function highlight() {
+            dropArea.classList.add('highlight');
+        }
+
+        function unhighlight() {
+            dropArea.classList.remove('highlight');
+        }
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles({ target: { files } });
+        }
+
+        function handleFiles(e) {
+            const selectedFile = e.target.files[0];
+            
+            if (!selectedFile) {
+                return;
+            }
+            
+            // Check if file is XML
+            if (!selectedFile.name.toLowerCase().endsWith('.xml')) {
+                statusEl.innerHTML = 'Please select an XML file (.xml)';
+                statusEl.className = 'status error';
+                xmlFile = null;
+                fileInfo.textContent = 'No valid file selected';
+                convertBtn.disabled = true;
+                return;
+            }
+            
+            xmlFile = selectedFile;
+            fileInfo.textContent = `Selected: ${xmlFile.name} (${formatFileSize(xmlFile.size)})`;
+            convertBtn.disabled = false;
+            statusEl.textContent = '';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' bytes';
+            else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            else return (bytes / 1048576).toFixed(1) + ' MB';
+        }
+
+        function convertXmlToExcel() {
+            if (!xmlFile) {
+                statusEl.innerHTML = 'Please select an XML file first';
+                statusEl.className = 'status error';
+                return;
+            }
+            
+            statusEl.innerHTML = 'Converting...';
+            statusEl.className = 'status';
+            
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const xmlText = e.target.result;
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+                    
+                    // Check for parsing errors
+                    const parserError = xmlDoc.querySelector('parsererror');
+                    if (parserError) {
+                        throw new Error("XML parsing error: " + parserError.textContent);
+                    }
+                    
+                    // Process XML structure to extract tabular data
+                    const processedData = processXmlData(xmlDoc);
+                    
+                    if (Object.keys(processedData).length === 0) {
+                        throw new Error("Could not extract structured data from the XML file");
+                    }
+
+                    // Create workbook
+                    const wb = XLSX.utils.book_new();
+                    let sheetAdded = false;
+                    
+                    // Add sheets for each data table found
+                    for (const [sheetName, tableData] of Object.entries(processedData)) {
+                        if (tableData.length > 0) {
+                            // Create a worksheet from the table data
+                            const ws = XLSX.utils.json_to_sheet(tableData);
+                            // Add the worksheet to the workbook
+                            const safeSheetName = sheetName.replace(/[*?:/\\[\]]/g, '_').substring(0, 30);
+                            XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
+                            sheetAdded = true;
+                        }
+                    }
+
+                    // If no regular sheets were added, add a flat representation
+                    if (!sheetAdded) {
+                        const flatData = extractFlatData(xmlDoc);
+                        if (flatData.length > 0) {
+                            const ws = XLSX.utils.json_to_sheet(flatData);
+                            XLSX.utils.book_append_sheet(wb, ws, "Data");
+                            sheetAdded = true;
+                        } else {
+                            throw new Error("No data found in the XML file");
+                        }
+                    }
+                    
+                    // Save the Excel file
+                    const outputFilename = xmlFile.name.replace('.xml', '.xlsx');
+                    XLSX.writeFile(wb, outputFilename);
+                    
+                    statusEl.innerHTML = 'Conversion successful! Excel file downloaded.';
+                    statusEl.className = 'status success';
+                } catch (error) {
+                    console.error('Error during conversion:', error);
+                    statusEl.innerHTML = 'Error during conversion: ' + error.message;
+                    statusEl.className = 'status error';
+                }
+            };
+            
+            reader.onerror = function() {
+                statusEl.innerHTML = 'Error reading the file';
+                statusEl.className = 'status error';
+            };
+            
+            reader.readAsText(xmlFile);
+        }
+
+        function processXmlData(xmlDoc) {
+            const results = {};
+            const rootElement = xmlDoc.documentElement;
+            
+            // Look for collections of similar elements that would make good tables
+            const directChildren = Array.from(rootElement.children);
+            
+            if (directChildren.length === 0) {
+                // Handle simple XML with just attributes or text
+                return {
+                    "Data": [elementToObject(rootElement)]
+                };
+            }
+            
+            // Group children by tag name to find potential tables
+            const groupedByTag = {};
+            directChildren.forEach(child => {
+                if (!groupedByTag[child.tagName]) {
+                    groupedByTag[child.tagName] = [];
+                }
+                groupedByTag[child.tagName].push(child);
+            });
+            
+            // Process each group
+            for (const [tagName, elements] of Object.entries(groupedByTag)) {
+                if (elements.length > 0) {
+                    // Convert each element to a row object
+                    const rows = elements.map(element => elementToObject(element));
+                    results[tagName] = rows;
+                }
+            }
+            
+            // Also check for deeper nested repeated elements
+            findRepeatedStructures(rootElement, results);
+            
+            return results;
+        }
+        
+        function findRepeatedStructures(parentElement, results, prefix = '') {
+            // Group children by tag name
+            const childrenByTag = {};
+            Array.from(parentElement.children).forEach(child => {
+                if (!childrenByTag[child.tagName]) {
+                    childrenByTag[child.tagName] = [];
+                }
+                childrenByTag[child.tagName].push(child);
+            });
+            
+            // Look for groups with multiple similar elements
+            for (const [tagName, elements] of Object.entries(childrenByTag)) {
+                if (elements.length > 1) {
+                    // These might form a table
+                    const sheetName = prefix ? `${prefix}_${tagName}` : tagName;
+                    const rows = elements.map(element => elementToObject(element));
+                    results[sheetName] = rows;
+                } else if (elements.length === 1 && elements[0].children.length > 0) {
+                    // Single container - look deeper
+                    const newPrefix = prefix ? `${prefix}_${tagName}` : tagName;
+                    findRepeatedStructures(elements[0], results, newPrefix);
+                }
+            }
+        }
+        
+        function elementToObject(element) {
+            const obj = {};
+            
+            // Add attributes
+            Array.from(element.attributes).forEach(attr => {
+                obj[`@${attr.name}`] = attr.value;
+            });
+            
+            // Handle children
+            const childElements = Array.from(element.children);
+            
+            if (childElements.length === 0) {
+                // No children, use text content if not empty
+                const text = element.textContent.trim();
+                if (text) {
+                    obj['#text'] = text;
+                }
+                return obj;
+            }
+            
+            // Count occurrences of each child tag name
+            const childTagCounts = {};
+            childElements.forEach(child => {
+                childTagCounts[child.tagName] = (childTagCounts[child.tagName] || 0) + 1;
+            });
+            
+            // Process children
+            childElements.forEach(child => {
+                const tagName = child.tagName;
+                
+                if (childTagCounts[tagName] === 1) {
+                    // Only one of this tag, flatten it
+                    if (child.children.length === 0 && !child.hasAttributes()) {
+                        // Simple text node
+                        obj[tagName] = child.textContent.trim();
+                    } else {
+                        // More complex, get all its properties
+                        const childObj = elementToObject(child);
+                        
+                        // If the child only has text content, simplify
+                        if (Object.keys(childObj).length === 1 && '#text' in childObj) {
+                            obj[tagName] = childObj['#text'];
+                        } else {
+                            // Otherwise include all properties with prefixed keys
+                            for (const [key, value] of Object.entries(childObj)) {
+                                obj[`${tagName}_${key}`] = value;
+                            }
+                        }
+                    }
+                } else {
+                    // Multiple with same tag, use arrays
+                    if (!obj[tagName]) {
+                        obj[tagName] = [];
+                    }
+                    
+                    if (child.children.length === 0 && !child.hasAttributes()) {
+                        // Simple text node in array
+                        obj[tagName].push(child.textContent.trim());
+                    } else {
+                        // Complex object in array
+                        obj[tagName].push(elementToObject(child));
+                    }
+                }
+            });
+            
+            return obj;
+        }
+        
+        function extractFlatData(xmlDoc) {
+            // This function creates a completely flat representation
+            // for XML documents that don't have a clear tabular structure
+            const rootElement = xmlDoc.documentElement;
+            const result = [];
+            
+            // Start with root level data
+            const rootData = { Element: rootElement.tagName };
+            
+            // Add attributes
+            Array.from(rootElement.attributes).forEach(attr => {
+                rootData[`@${attr.name}`] = attr.value;
+            });
+            
+            // Add text content if present
+            if (rootElement.children.length === 0) {
+                rootData['Value'] = rootElement.textContent.trim();
+            }
+            
+            result.push(rootData);
+            
+            // Add all nested elements recursively
+            function addElements(parent, path) {
+                Array.from(parent.children).forEach((element, index) => {
+                    const elementPath = path ? `${path}/${element.tagName}[${index}]` : element.tagName;
+                    const elementData = { Element: elementPath };
+                    
+                    // Add attributes
+                    Array.from(element.attributes).forEach(attr => {
+                        elementData[`@${attr.name}`] = attr.value;
+                    });
+                    
+                    // Add text content if no children
+                    if (element.children.length === 0) {
+                        elementData['Value'] = element.textContent.trim();
+                    }
+                    
+                    result.push(elementData);
+                    
+                    // Process children
+                    addElements(element, elementPath);
+                });
+            }
+            
+            addElements(rootElement, '');
+            
+            return result;
+        }
+    </script>
+</body>
+</html>
